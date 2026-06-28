@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>love</title>
+  <link rel="icon" type="image/png" href="icon.png">
+  <link rel="apple-touch-icon" href="icon.png">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="columns"></div>
+  <div id="player">
+    <div id="cover-area">
+      <div id="cover-container">
+        <img id="cover-art" alt="">
+        <img id="cover-placeholder" src="icon.png" alt="love">
+      </div>
+      <div id="volume-container">
+        <input type="range" id="volume" min="0" max="100" step="1" value="100" orient="vertical">
+        <span id="volume-display">0 dB</span>
+      </div>
+    </div>
+    <div id="track-info">
+      <div id="track-title"></div>
+      <div id="track-artist"></div>
+    </div>
+    <div id="controls">
+      <div id="seek-container">
+        <div id="seek-bar">
+          <div id="seek-progress"></div>
+        </div>
+      </div>
+      <div id="time-row">
+        <span id="time-elapsed">0:00</span>
+        <span id="track-position">—</span>
+        <span id="time-duration">0:00</span>
+      </div>
+      <div id="transport">
+        <button id="btn-prev" title="Previous">⏮</button>
+        <button id="btn-play" title="Play">▶</button>
+        <button id="btn-next" title="Next">⏭</button>
+      </div>
+    </div>
+  </div>
+  <div id="search-overlay" class="hidden">
+    <div id="search-box">
+      <input id="search-input" type="text" placeholder="Search tracks…" autocomplete="off" spellcheck="false">
+      <div id="search-results"></div>
+    </div>
+  </div>
+  <div id="toast" class="hidden"></div>
+  <audio id="audio" preload="auto"></audio>
+  <script src="dist/app.js"></script>
+</body>
+</html>

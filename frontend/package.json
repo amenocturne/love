@@ -1,0 +1,8 @@
+{
+  "name": "love-frontend",
+  "private": true,
+  "scripts": {
+    "build": "bun build app.ts --outdir dist --minify",
+    "dev": "bun build app.ts --outdir dist --watch"
+  }
+}
