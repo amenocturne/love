@@ -38,7 +38,6 @@ body {
   flex: 0 0 60%;
   display: flex;
   overflow: hidden;
-  border-right: 1px solid var(--border);
 }
 
 .column {
