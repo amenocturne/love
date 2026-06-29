@@ -144,24 +144,16 @@ async function warmFolder(folderPath: string) {
   const entries = browseCache.get(folderPath) || []
   const files = entries.filter(e => e.kind === "file")
 
-  const currentIndex = state.playing ? files.findIndex(f => f.path === state.playing!.path) : -1
-  const reordered = currentIndex >= 0
-    ? [...files.slice(currentIndex + 1), ...files.slice(0, currentIndex)]
-    : files
-
-  for (const file of reordered) {
-    if (signal.aborted) break
-    if (audioCache.has(file.path)) continue
+  await Promise.all(files.map(async (file) => {
+    if (signal.aborted || audioCache.has(file.path)) return
     try {
       const res = await fetch(streamUrl(file.path), { signal })
-      if (!res.ok) continue
+      if (!res.ok) return
       const blob = await res.blob()
-      if (signal.aborted) break
+      if (signal.aborted) return
       audioCache.set(file.path, URL.createObjectURL(blob))
-    } catch {
-      if (signal.aborted) break
-    }
-  }
+    } catch {}
+  }))
 }
 
 // --- Formatting ---
