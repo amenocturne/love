@@ -239,6 +239,70 @@ pub struct SearchResponse {
     results: Vec<search::SearchEntry>,
 }
 
+pub async fn tree(
+    State(state): State<Arc<AppState>>,
+) -> Result<axum::Json<std::collections::HashMap<String, Vec<BrowseEntry>>>, ApiError> {
+    let music_canonical = state.music_dir.canonicalize()?;
+    let mut tree = std::collections::HashMap::new();
+    build_tree(&music_canonical, &music_canonical, &mut tree)?;
+    Ok(axum::Json(tree))
+}
+
+fn build_tree(
+    base: &std::path::Path,
+    current: &std::path::Path,
+    tree: &mut std::collections::HashMap<String, Vec<BrowseEntry>>,
+) -> Result<(), ApiError> {
+    let mut entries = Vec::new();
+    let read_dir = std::fs::read_dir(current)?;
+
+    for entry in read_dir.flatten() {
+        let file_type = match entry.file_type() {
+            Ok(ft) => ft,
+            Err(_) => continue,
+        };
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if name.starts_with('.') || name == "System Volume Information" {
+            continue;
+        }
+        let entry_path = entry.path();
+        let relative = entry_path
+            .strip_prefix(base)
+            .unwrap_or(&entry_path)
+            .to_string_lossy()
+            .into_owned();
+
+        if file_type.is_dir() {
+            entries.push(BrowseEntry {
+                name,
+                kind: "dir",
+                path: relative,
+            });
+            build_tree(base, &entry_path, tree)?;
+        } else if file_type.is_file() && is_audio_file(&entry_path) {
+            entries.push(BrowseEntry {
+                name,
+                kind: "file",
+                path: relative,
+            });
+        }
+    }
+
+    entries.sort_by(|a, b| match (a.kind, b.kind) {
+        ("dir", "file") => std::cmp::Ordering::Less,
+        ("file", "dir") => std::cmp::Ordering::Greater,
+        _ => natural_cmp(&a.name, &b.name),
+    });
+
+    let key = current
+        .strip_prefix(base)
+        .unwrap_or(current)
+        .to_string_lossy()
+        .into_owned();
+    tree.insert(key, entries);
+    Ok(())
+}
+
 pub async fn search_tracks(
     Query(params): Query<SearchParams>,
     State(state): State<Arc<AppState>>,

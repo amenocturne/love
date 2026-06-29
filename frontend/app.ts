@@ -76,13 +76,21 @@ const state: AppState = {
   searchSelectedIndex: 0,
 }
 
-// --- API ---
+// --- API + Cache ---
 
-async function fetchEntries(path: string): Promise<Entry[]> {
-  const res = await fetch(`/api/browse?path=${encodeURIComponent(path)}`)
-  if (!res.ok) return []
-  const data = await res.json()
-  return data.entries
+const browseCache = new Map<string, Entry[]>()
+
+async function loadTree() {
+  const res = await fetch("/api/tree")
+  if (!res.ok) return
+  const tree: Record<string, Entry[]> = await res.json()
+  for (const [path, entries] of Object.entries(tree)) {
+    browseCache.set(path, entries)
+  }
+}
+
+function fetchEntries(path: string): Entry[] {
+  return browseCache.get(path) || []
 }
 
 async function fetchMetadata(path: string): Promise<TrackMetadata> {
@@ -254,7 +262,7 @@ async function updateTrackInfo(trackPath: string, fileName: string) {
 
 // --- Navigation ---
 
-async function enterDirectory(colIndex: number, rowIndex: number) {
+function enterDirectory(colIndex: number, rowIndex: number) {
   const col = state.columns[colIndex]
   if (!col) return
   const entry = col.entries[rowIndex]
@@ -262,7 +270,7 @@ async function enterDirectory(colIndex: number, rowIndex: number) {
 
   col.selectedRow = rowIndex
   state.columns = state.columns.slice(0, colIndex + 1)
-  const entries = await fetchEntries(entry.path)
+  const entries = fetchEntries(entry.path)
   state.columns.push({ path: entry.path, entries, selectedRow: 0 })
   state.focusCol = state.columns.length - 1
   state.focusRow = 0
@@ -451,13 +459,13 @@ async function selectSearchItem(index: number) {
   }
   addToSearchHistory($searchInput.value.trim())
   closeSearch()
-  await navigateToPath(item.path)
+  navigateToPath(item.path)
 }
 
-async function navigateToPath(fullPath: string, autoplay = true) {
+function navigateToPath(fullPath: string, autoplay = true) {
   const segments = fullPath.split("/")
 
-  const rootEntries = await fetchEntries("")
+  const rootEntries = fetchEntries("")
   state.columns = [{ path: "", entries: rootEntries, selectedRow: 0 }]
 
   let lastFileIndex = -1
@@ -471,7 +479,7 @@ async function navigateToPath(fullPath: string, autoplay = true) {
     col.selectedRow = entryIndex
 
     if (entry.kind === "dir") {
-      const entries = await fetchEntries(entry.path)
+      const entries = fetchEntries(entry.path)
       state.columns.push({ path: entry.path, entries, selectedRow: 0 })
     } else {
       state.focusCol = state.columns.length - 1
@@ -538,11 +546,11 @@ function onSearchKeyDown(e: KeyboardEvent) {
   }
 }
 
-async function onCoverClick() {
+function onCoverClick() {
   if (!state.playing) return
   const segments = state.playing.path.split("/")
 
-  const rootEntries = await fetchEntries("")
+  const rootEntries = fetchEntries("")
   state.columns = [{ path: "", entries: rootEntries, selectedRow: 0 }]
 
   for (let i = 0; i < segments.length; i++) {
@@ -552,7 +560,7 @@ async function onCoverClick() {
     const entry = col.entries[entryIndex]
     col.selectedRow = entryIndex
     if (entry.kind === "dir") {
-      const entries = await fetchEntries(entry.path)
+      const entries = fetchEntries(entry.path)
       state.columns.push({ path: entry.path, entries, selectedRow: 0 })
     } else {
       state.focusCol = state.columns.length - 1
@@ -795,7 +803,7 @@ async function restoreState() {
       onVolumeChange()
     }
     if (data.path) {
-      await navigateToPath(data.path, false)
+      navigateToPath(data.path, false)
       $audio.currentTime = data.currentTime || 0
       $audio.pause()
       updatePlayerUI()
@@ -816,8 +824,8 @@ function setupMediaSession() {
 // --- Init ---
 
 async function init() {
-  const entries = await fetchEntries("")
-  state.columns = [{ path: "", entries, selectedRow: 0 }]
+  await loadTree()
+  state.columns = [{ path: "", entries: fetchEntries(""), selectedRow: 0 }]
   state.focusCol = 0
   state.focusRow = 0
   renderColumns()

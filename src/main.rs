@@ -42,6 +42,7 @@ async fn main() {
 
     let app = Router::new()
         .route("/api/browse", get(api::browse))
+        .route("/api/tree", get(api::tree))
         .route("/api/search", get(api::search_tracks))
         .route("/api/stream/{*path}", get(api::stream))
         .route("/api/metadata/{*path}", get(api::metadata))
