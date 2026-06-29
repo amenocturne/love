@@ -1,5 +1,9 @@
+use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, LazyLock};
+
+use tokio::sync::Mutex;
 
 #[derive(Debug)]
 pub enum TranscodeError {
@@ -20,8 +24,24 @@ fn cache_path(source: &Path) -> PathBuf {
     std::env::temp_dir().join(format!("love-{:016x}.ogg", hash))
 }
 
+static TRANSCODE_LOCKS: LazyLock<Mutex<HashMap<PathBuf, Arc<Mutex<()>>>>> =
+    LazyLock::new(Default::default);
+
 pub async fn flac_to_opus(path: &Path) -> Result<PathBuf, TranscodeError> {
     let cached = cache_path(path);
+    if cached.exists() {
+        return Ok(cached);
+    }
+
+    let lock = {
+        let mut locks = TRANSCODE_LOCKS.lock().await;
+        locks
+            .entry(path.to_path_buf())
+            .or_insert_with(|| Arc::new(Mutex::new(())))
+            .clone()
+    };
+    let _guard = lock.lock().await;
+
     if cached.exists() {
         return Ok(cached);
     }

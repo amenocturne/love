@@ -241,20 +241,30 @@ pub struct SearchResponse {
 
 pub async fn tree(
     State(state): State<Arc<AppState>>,
-) -> Result<axum::Json<std::collections::HashMap<String, Vec<BrowseEntry>>>, ApiError> {
-    let music_canonical = state.music_dir.canonicalize()?;
-    let mut tree = std::collections::HashMap::new();
-    build_tree(&music_canonical, &music_canonical, &mut tree)?;
-    Ok(axum::Json(tree))
+) -> Response {
+    http::Response::builder()
+        .header(http::header::CONTENT_TYPE, "application/json")
+        .body(axum::body::Body::from(state.tree_json.clone()))
+        .unwrap()
 }
 
-fn build_tree(
+pub fn build_tree_json(music_dir: &std::path::Path) -> Vec<u8> {
+    let music_canonical = music_dir.canonicalize().expect("music dir must exist");
+    let mut tree = std::collections::HashMap::new();
+    build_tree_recursive(&music_canonical, &music_canonical, &mut tree);
+    serde_json::to_vec(&tree).unwrap()
+}
+
+fn build_tree_recursive(
     base: &std::path::Path,
     current: &std::path::Path,
     tree: &mut std::collections::HashMap<String, Vec<BrowseEntry>>,
-) -> Result<(), ApiError> {
+) {
     let mut entries = Vec::new();
-    let read_dir = std::fs::read_dir(current)?;
+    let read_dir = match std::fs::read_dir(current) {
+        Ok(rd) => rd,
+        Err(_) => return,
+    };
 
     for entry in read_dir.flatten() {
         let file_type = match entry.file_type() {
@@ -278,7 +288,7 @@ fn build_tree(
                 kind: "dir",
                 path: relative,
             });
-            build_tree(base, &entry_path, tree)?;
+            build_tree_recursive(base, &entry_path, tree);
         } else if file_type.is_file() && is_audio_file(&entry_path) {
             entries.push(BrowseEntry {
                 name,
@@ -300,7 +310,6 @@ fn build_tree(
         .to_string_lossy()
         .into_owned();
     tree.insert(key, entries);
-    Ok(())
 }
 
 pub async fn search_tracks(
@@ -323,6 +332,41 @@ pub async fn metadata(
     let file_path = resolve_safe_path(&state.music_dir, &path)?;
     let meta = cover::extract_metadata(&file_path)?;
     Ok(axum::Json(meta))
+}
+
+pub async fn warm(
+    Query(params): Query<BrowseParams>,
+    State(state): State<Arc<AppState>>,
+) -> Result<http::StatusCode, ApiError> {
+    let music_canonical = state.music_dir.canonicalize()?;
+    let dir = match &params.path {
+        Some(p) if !p.is_empty() => resolve_safe_path(&state.music_dir, p)?,
+        _ => music_canonical,
+    };
+
+    let mut flac_paths = Vec::new();
+    let mut read_dir = tokio::fs::read_dir(&dir).await?;
+    while let Some(entry) = read_dir.next_entry().await? {
+        let path = entry.path();
+        if path
+            .extension()
+            .and_then(|e| e.to_str())
+            .is_some_and(|e| e.eq_ignore_ascii_case("flac"))
+        {
+            flac_paths.push(path);
+        }
+    }
+
+    let handles: Vec<_> = flac_paths
+        .into_iter()
+        .map(|path| tokio::spawn(async move { transcode::flac_to_opus(&path).await }))
+        .collect();
+
+    for handle in handles {
+        let _ = handle.await;
+    }
+
+    Ok(http::StatusCode::NO_CONTENT)
 }
 
 pub async fn cover(

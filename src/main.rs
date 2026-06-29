@@ -8,13 +8,15 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use axum::Router;
-use axum::routing::get;
+use axum::routing::{get, post};
+use tower_http::compression::CompressionLayer;
 use tower_http::services::ServeDir;
 
 pub struct AppState {
     pub music_dir: PathBuf,
     pub frontend_dir: PathBuf,
     pub search_index: search::SearchIndex,
+    pub tree_json: Vec<u8>,
 }
 
 #[tokio::main]
@@ -33,11 +35,14 @@ async fn main() {
     };
 
     let search_index = search::SearchIndex::build(&music_dir);
+    let tree_json = api::build_tree_json(&music_dir);
+    tracing::info!("tree cache: {} bytes", tree_json.len());
 
     let state = Arc::new(AppState {
         music_dir,
         frontend_dir: frontend_dir.clone(),
         search_index,
+        tree_json,
     });
 
     let app = Router::new()
@@ -47,6 +52,8 @@ async fn main() {
         .route("/api/stream/{*path}", get(api::stream))
         .route("/api/metadata/{*path}", get(api::metadata))
         .route("/api/cover/{*path}", get(api::cover))
+        .route("/api/warm", post(api::warm))
+        .layer(CompressionLayer::new())
         .fallback_service(ServeDir::new(frontend_dir))
         .with_state(state);
 

@@ -79,6 +79,9 @@ const state: AppState = {
 // --- API + Cache ---
 
 const browseCache = new Map<string, Entry[]>()
+const audioCache = new Map<string, string>()
+let warmingFolder = ""
+let warmController: AbortController | null = null
 
 async function loadTree() {
   const res = await fetch("/api/tree")
@@ -116,6 +119,49 @@ function streamUrl(path: string): string {
 
 function coverUrl(path: string): string {
   return `/api/cover/${encodePath(path)}`
+}
+
+function clearAudioCache() {
+  for (const url of audioCache.values()) URL.revokeObjectURL(url)
+  audioCache.clear()
+  warmingFolder = ""
+}
+
+async function warmFolder(folderPath: string) {
+  if (warmingFolder === folderPath) return
+
+  if (warmController) warmController.abort()
+  clearAudioCache()
+
+  warmingFolder = folderPath
+  warmController = new AbortController()
+  const signal = warmController.signal
+
+  try {
+    await fetch(`/api/warm?path=${encodeURIComponent(folderPath)}`, { method: "POST", signal })
+  } catch { return }
+
+  const entries = browseCache.get(folderPath) || []
+  const files = entries.filter(e => e.kind === "file")
+
+  const currentIndex = state.playing ? files.findIndex(f => f.path === state.playing!.path) : -1
+  const reordered = currentIndex >= 0
+    ? [...files.slice(currentIndex + 1), ...files.slice(0, currentIndex)]
+    : files
+
+  for (const file of reordered) {
+    if (signal.aborted) break
+    if (audioCache.has(file.path)) continue
+    try {
+      const res = await fetch(streamUrl(file.path), { signal })
+      if (!res.ok) continue
+      const blob = await res.blob()
+      if (signal.aborted) break
+      audioCache.set(file.path, URL.createObjectURL(blob))
+    } catch {
+      if (signal.aborted) break
+    }
+  }
 }
 
 // --- Formatting ---
@@ -294,12 +340,13 @@ function playFile(colIndex: number, rowIndex: number) {
     totalFiles: files.length,
   }
 
-  $audio.src = streamUrl(entry.path)
+  $audio.src = audioCache.get(entry.path) || streamUrl(entry.path)
   $audio.play()
   updateCoverArt(entry.path)
   updateTrackInfo(entry.path, entry.name)
   updatePlayerUI()
   renderColumns()
+  warmFolder(col.path)
 }
 
 function playByFileIndex(delta: number) {
@@ -331,7 +378,7 @@ function playByFileIndex(delta: number) {
     }
   }
 
-  $audio.src = streamUrl(file.path)
+  $audio.src = audioCache.get(file.path) || streamUrl(file.path)
   $audio.play()
   updateCoverArt(file.path)
   updateTrackInfo(file.path, file.name)
@@ -510,11 +557,12 @@ function navigateToPath(fullPath: string, autoplay = true) {
       index: fileIndex,
       totalFiles: files.length,
     }
-    $audio.src = streamUrl(entry.path)
+    $audio.src = audioCache.get(entry.path) || streamUrl(entry.path)
     updateCoverArt(entry.path)
     updateTrackInfo(entry.path, entry.name)
     updatePlayerUI()
     renderColumns()
+    warmFolder(col.path)
   }
 }
 
@@ -701,6 +749,7 @@ function prefetchNextTrack() {
   const nextIndex = state.playing.index + 1
   if (nextIndex >= files.length) return
   const nextPath = files[nextIndex].path
+  if (audioCache.has(nextPath)) return
   if (prefetchedPath === nextPath) return
   prefetchedPath = nextPath
   fetch(streamUrl(nextPath), { method: "HEAD" })
@@ -766,6 +815,7 @@ function stopAndReset() {
   $audio.load()
   state.playing = null
   prefetchedPath = ""
+  clearAudioCache()
   $coverArt.classList.remove("visible")
   $coverArt.src = ""
   $coverPlaceholder.classList.remove("hidden")
