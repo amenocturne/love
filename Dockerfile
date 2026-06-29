@@ -18,7 +18,7 @@ COPY --from=builder /app/target/release/love /usr/local/bin/love
 COPY --from=frontend /app/frontend/dist/ /app/frontend/dist/
 COPY frontend/index.html /app/frontend/
 COPY frontend/style.css /app/frontend/
-COPY frontend/icon.png /app/frontend/
+COPY frontend/icon.webp /app/frontend/
 
 ENV MUSIC_DIR=/music
 ENV LISTEN_ADDR=0.0.0.0:3000
