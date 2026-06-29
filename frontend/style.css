@@ -466,3 +466,16 @@ body {
 .search-result {
   position: relative;
 }
+
+/* --- Version --- */
+
+#version {
+  position: fixed;
+  bottom: 4px;
+  right: 8px;
+  font-size: 9px;
+  color: var(--text-dim);
+  opacity: 0.4;
+  pointer-events: none;
+  z-index: 50;
+}

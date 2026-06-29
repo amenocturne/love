@@ -908,6 +908,10 @@ async function init() {
   setupMediaSession()
   loadSearchHistory()
   await restoreState()
+
+  fetch("/api/version").then(r => r.json()).then(v => {
+    document.getElementById("version")!.textContent = v.commit
+  }).catch(() => {})
 }
 
 init()

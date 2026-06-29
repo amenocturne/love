@@ -1,9 +1,10 @@
 FROM rust:1.89-bookworm AS builder
 
+ARG COMMIT_SHA=unknown
 WORKDIR /app
 COPY Cargo.toml Cargo.lock ./
 COPY src/ src/
-RUN cargo build --release
+RUN LOVE_COMMIT=${COMMIT_SHA} cargo build --release
 
 FROM oven/bun:1 AS frontend
 WORKDIR /app

@@ -53,6 +53,7 @@ async fn main() {
         .route("/api/metadata/{*path}", get(api::metadata))
         .route("/api/cover/{*path}", get(api::cover))
         .route("/api/warm", post(api::warm))
+        .route("/api/version", get(api::version))
         .layer(CompressionLayer::new())
         .fallback_service(ServeDir::new(frontend_dir))
         .with_state(state);

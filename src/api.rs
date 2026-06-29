@@ -66,6 +66,15 @@ impl From<cover::CoverError> for ApiError {
     }
 }
 
+const COMMIT: &str = match option_env!("LOVE_COMMIT") {
+    Some(v) => v,
+    None => "dev",
+};
+
+pub async fn version() -> axum::Json<serde_json::Value> {
+    axum::Json(serde_json::json!({ "commit": COMMIT }))
+}
+
 const AUDIO_EXTENSIONS: &[&str] = &[
     "mp3", "flac", "wav", "ogg", "opus", "m4a", "aac", "wma", "ape",
 ];
