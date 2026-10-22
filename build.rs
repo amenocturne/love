@@ -11,10 +11,9 @@ fn main() {
     if let Ok(output) = Command::new("git")
         .args(["rev-parse", "--short", "HEAD"])
         .output()
+        && output.status.success()
     {
-        if output.status.success() {
-            let hash = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            println!("cargo:rustc-env=LOVE_COMMIT={hash}");
-        }
+        let hash = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        println!("cargo:rustc-env=LOVE_COMMIT={hash}");
     }
 }

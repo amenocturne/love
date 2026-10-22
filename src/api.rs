@@ -79,7 +79,7 @@ const AUDIO_EXTENSIONS: &[&str] = &[
     "mp3", "flac", "wav", "ogg", "opus", "m4a", "aac", "wma", "ape",
 ];
 
-fn is_audio_file(path: &Path) -> bool {
+pub(crate) fn is_audio_file(path: &Path) -> bool {
     path.extension()
         .and_then(|e| e.to_str())
         .is_some_and(|e| AUDIO_EXTENSIONS.contains(&e.to_ascii_lowercase().as_str()))
@@ -96,7 +96,7 @@ fn resolve_safe_path(music_dir: &Path, relative: &str) -> Result<PathBuf, ApiErr
     Ok(canonical)
 }
 
-fn natural_cmp(a: &str, b: &str) -> std::cmp::Ordering {
+pub(crate) fn natural_cmp(a: &str, b: &str) -> std::cmp::Ordering {
     let mut ai = a.chars().peekable();
     let mut bi = b.chars().peekable();
 
@@ -132,7 +132,9 @@ fn take_number(chars: &mut std::iter::Peekable<std::str::Chars>) -> u64 {
     let mut n: u64 = 0;
     while let Some(c) = chars.peek() {
         if c.is_ascii_digit() {
-            n = n.saturating_mul(10).saturating_add((*c as u64) - ('0' as u64));
+            n = n
+                .saturating_mul(10)
+                .saturating_add((*c as u64) - ('0' as u64));
             chars.next();
         } else {
             break;
@@ -151,11 +153,11 @@ pub struct BrowseResponse {
     entries: Vec<BrowseEntry>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 pub struct BrowseEntry {
-    name: String,
-    kind: &'static str,
-    path: String,
+    pub name: String,
+    pub kind: &'static str,
+    pub path: String,
 }
 
 pub async fn browse(
@@ -227,7 +229,7 @@ pub async fn stream(
             .oneshot(request)
             .await
             .expect("ServeFile is infallible");
-        return Ok(response.into_response());
+        Ok(response.into_response())
     } else {
         // ServeFile handles Range requests, Content-Length, ETag
         let response = ServeFile::new(&file_path)
@@ -248,84 +250,40 @@ pub struct SearchResponse {
     results: Vec<search::SearchEntry>,
 }
 
-pub async fn tree(
-    State(state): State<Arc<AppState>>,
-) -> Response {
+pub async fn tree(State(state): State<Arc<AppState>>, headers: http::HeaderMap) -> Response {
+    let snapshot = state.library.snapshot();
+    let unchanged = headers
+        .get(http::header::IF_NONE_MATCH)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| {
+            value.split(',').any(|tag| {
+                let tag = tag.trim();
+                tag == "*" || tag.strip_prefix("W/").unwrap_or(tag) == snapshot.etag
+            })
+        });
     http::Response::builder()
+        .status(if unchanged {
+            StatusCode::NOT_MODIFIED
+        } else {
+            StatusCode::OK
+        })
         .header(http::header::CONTENT_TYPE, "application/json")
-        .body(axum::body::Body::from(state.tree_json.clone()))
+        .header(http::header::CACHE_CONTROL, "no-cache")
+        .header(http::header::ETAG, &snapshot.etag)
+        .body(if unchanged {
+            axum::body::Body::empty()
+        } else {
+            axum::body::Body::from(snapshot.tree_json.clone())
+        })
         .unwrap()
-}
-
-pub fn build_tree_json(music_dir: &std::path::Path) -> Vec<u8> {
-    let music_canonical = music_dir.canonicalize().expect("music dir must exist");
-    let mut tree = std::collections::HashMap::new();
-    build_tree_recursive(&music_canonical, &music_canonical, &mut tree);
-    serde_json::to_vec(&tree).unwrap()
-}
-
-fn build_tree_recursive(
-    base: &std::path::Path,
-    current: &std::path::Path,
-    tree: &mut std::collections::HashMap<String, Vec<BrowseEntry>>,
-) {
-    let mut entries = Vec::new();
-    let read_dir = match std::fs::read_dir(current) {
-        Ok(rd) => rd,
-        Err(_) => return,
-    };
-
-    for entry in read_dir.flatten() {
-        let file_type = match entry.file_type() {
-            Ok(ft) => ft,
-            Err(_) => continue,
-        };
-        let name = entry.file_name().to_string_lossy().into_owned();
-        if name.starts_with('.') || name == "System Volume Information" {
-            continue;
-        }
-        let entry_path = entry.path();
-        let relative = entry_path
-            .strip_prefix(base)
-            .unwrap_or(&entry_path)
-            .to_string_lossy()
-            .into_owned();
-
-        if file_type.is_dir() {
-            entries.push(BrowseEntry {
-                name,
-                kind: "dir",
-                path: relative,
-            });
-            build_tree_recursive(base, &entry_path, tree);
-        } else if file_type.is_file() && is_audio_file(&entry_path) {
-            entries.push(BrowseEntry {
-                name,
-                kind: "file",
-                path: relative,
-            });
-        }
-    }
-
-    entries.sort_by(|a, b| match (a.kind, b.kind) {
-        ("dir", "file") => std::cmp::Ordering::Less,
-        ("file", "dir") => std::cmp::Ordering::Greater,
-        _ => natural_cmp(&a.name, &b.name),
-    });
-
-    let key = current
-        .strip_prefix(base)
-        .unwrap_or(current)
-        .to_string_lossy()
-        .into_owned();
-    tree.insert(key, entries);
 }
 
 pub async fn search_tracks(
     Query(params): Query<SearchParams>,
     State(state): State<Arc<AppState>>,
 ) -> axum::Json<SearchResponse> {
-    let results = state
+    let snapshot = state.library.snapshot();
+    let results = snapshot
         .search_index
         .search(&params.q, 50)
         .into_iter()

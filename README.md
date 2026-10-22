@@ -22,6 +22,7 @@ No existing self-hosted player preserves this. Love does.
 
 - **Miller column navigation** — Finder-style column view of your music folder tree
 - **Keyboard-first** — vim keys (hjkl), arrows, space for play/pause, `/` for search
+- **Automatic library refresh** — folder browsing and search follow added, renamed, and deleted music without restarting; open tabs update while playback continues
 - **Fuzzy search** — search the full path to find tracks across your library
 - **Cover art** — extracted from embedded ID3/Vorbis tags
 - **FLAC support** — transcoded to Opus on the fly via ffmpeg, cached for instant replay
@@ -57,6 +58,8 @@ services:
 ```
 docker compose up -d
 ```
+
+Library changes are checked every 5 seconds. Set `LIBRARY_REFRESH_SECONDS` to a positive integer to change the server scan interval. Visible browser tabs check for new snapshots every 5 seconds and on returning to the tab. Failed scans retain the previous complete library and retry automatically.
 
 ## Keyboard shortcuts
 

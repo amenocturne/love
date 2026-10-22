@@ -42,4 +42,4 @@ frontend/
 - Frontend is vanilla TS, bundled by bun, served as static files by axum
 - FLAC transcoding shells out to ffmpeg (must be in PATH)
 - Cover art extracted via lofty (pure Rust), cached in memory
-- No database, no indexing — filesystem is the source of truth
+- Filesystem is the source of truth; library.rs scans in the background and atomically replaces a shared folder-tree/search snapshot. Failed scans retain the previous snapshot. /api/tree uses content ETags; visible frontend tabs revalidate periodically.

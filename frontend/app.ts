@@ -83,13 +83,70 @@ const audioCache = new Map<string, string>()
 let warmingFolder = ""
 let warmController: AbortController | null = null
 
-async function loadTree() {
-  const res = await fetch("/api/tree")
-  if (!res.ok) return
-  const tree: Record<string, Entry[]> = await res.json()
-  for (const [path, entries] of Object.entries(tree)) {
-    browseCache.set(path, entries)
+let treeEtag: string | null = null
+let treeRequestInFlight = false
+
+async function loadTree(): Promise<boolean> {
+  if (treeRequestInFlight) return false
+  treeRequestInFlight = true
+  try {
+    const headers: Record<string, string> = {}
+    if (treeEtag) headers["If-None-Match"] = treeEtag
+    const res = await fetch("/api/tree", { headers, cache: "no-cache" })
+    if (res.status === 304 || !res.ok) return false
+    const tree: Record<string, Entry[]> = await res.json()
+    browseCache.clear()
+    for (const [path, entries] of Object.entries(tree)) {
+      browseCache.set(path, entries)
+    }
+    treeEtag = res.headers.get("ETag")
+    return true
+  } catch {
+    // Keep the last complete tree while the server is temporarily unavailable.
+    return false
+  } finally {
+    treeRequestInFlight = false
   }
+}
+
+function refreshColumns() {
+  const focusedPath = state.columns[state.focusCol]?.entries[state.focusRow]?.path
+  const columns: Column[] = []
+  for (const previous of state.columns) {
+    if (!browseCache.has(previous.path)) break
+    if (columns.length > 0 && !columns[columns.length - 1].entries.some(
+      entry => entry.kind === "dir" && entry.path === previous.path,
+    )) break
+    const entries = fetchEntries(previous.path)
+    const selectedPath = previous.entries[previous.selectedRow]?.path
+    const selectedRow = entries.findIndex(entry => entry.path === selectedPath)
+    columns.push({
+      path: previous.path,
+      entries,
+      selectedRow: selectedRow >= 0 ? selectedRow : Math.max(0, Math.min(previous.selectedRow, entries.length - 1)),
+    })
+  }
+  state.columns = columns.length > 0 ? columns : [{ path: "", entries: fetchEntries(""), selectedRow: 0 }]
+  state.focusCol = Math.min(state.focusCol, state.columns.length - 1)
+  const focusedColumn = state.columns[state.focusCol]
+  const focusedRow = focusedColumn.entries.findIndex(entry => entry.path === focusedPath)
+  state.focusRow = focusedRow >= 0 ? focusedRow : focusedColumn.selectedRow
+
+  if (state.playing) {
+    const files = fetchEntries(state.playing.folderPath).filter(entry => entry.kind === "file")
+    const index = files.findIndex(entry => entry.path === state.playing!.path)
+    if (index >= 0) {
+      state.playing = { ...state.playing, index, totalFiles: files.length }
+      updatePlayerUI()
+    }
+  }
+  renderColumns()
+}
+
+async function refreshLibrary() {
+  if (document.hidden || !await loadTree()) return
+  refreshColumns()
+  if (state.searchOpen && $searchInput.value.trim().length >= 2) doSearch()
 }
 
 function fetchEntries(path: string): Entry[] {
@@ -900,6 +957,11 @@ async function init() {
   setupMediaSession()
   loadSearchHistory()
   await restoreState()
+
+  setInterval(refreshLibrary, 5000)
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) refreshLibrary()
+  })
 
   fetch("/api/version").then(r => r.json()).then(v => {
     document.getElementById("version")!.textContent = v.commit
