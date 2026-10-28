@@ -35,6 +35,7 @@ frontend/
 
 - `GET /api/browse?path=<relative>` — directory listing as JSON
 - `GET /api/stream/<path>` — audio stream (mp3 direct, flac→opus)
+- `GET /api/download/<path>` — original audio file as an attachment; no transcoding
 - `GET /api/cover/<path>` — embedded cover art image
 
 ## Key Patterns

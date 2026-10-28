@@ -26,6 +26,7 @@ No existing self-hosted player preserves this. Love does.
 - **Fuzzy search** — search the full path to find tracks across your library
 - **Cover art** — extracted from embedded ID3/Vorbis tags
 - **FLAC support** — transcoded to Opus on the fly via ffmpeg, cached for instant replay
+- **Download selected track** — save the highlighted track in its original format and filename, including untranscoded FLAC
 - **MediaSession** — macOS media keys (play/pause/prev/next) work out of the box
 - **Persistent state** — reload the page and resume where you left off
 - **dB volume** — logarithmic fader with Ableton-style curve

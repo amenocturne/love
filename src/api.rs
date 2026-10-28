@@ -86,8 +86,8 @@ pub(crate) fn is_audio_file(path: &Path) -> bool {
 }
 
 fn resolve_safe_path(music_dir: &Path, relative: &str) -> Result<PathBuf, ApiError> {
-    let decoded = percent_encoding::percent_decode_str(relative).decode_utf8_lossy();
-    let joined = music_dir.join(decoded.as_ref());
+    // Axum has already decoded path and query parameters.
+    let joined = music_dir.join(relative);
     let canonical = joined.canonicalize().map_err(|_| ApiError::NotFound)?;
     let music_canonical = music_dir.canonicalize().map_err(|_| ApiError::NotFound)?;
     if !canonical.starts_with(&music_canonical) {
@@ -240,6 +240,35 @@ pub async fn stream(
     }
 }
 
+pub async fn download(
+    AxumPath(path): AxumPath<String>,
+    State(state): State<Arc<AppState>>,
+    request: Request,
+) -> Result<Response, ApiError> {
+    let file_path = resolve_safe_path(&state.music_dir, &path)?;
+    if !file_path.is_file() || !is_audio_file(&file_path) {
+        return Err(ApiError::NotFound);
+    }
+    let filename = Path::new(&path)
+        .file_name()
+        .ok_or(ApiError::NotFound)?
+        .to_string_lossy();
+    let encoded =
+        percent_encoding::utf8_percent_encode(&filename, percent_encoding::NON_ALPHANUMERIC);
+    let mut response = ServeFile::new(&file_path)
+        .oneshot(request)
+        .await
+        .expect("ServeFile is infallible")
+        .into_response();
+    response.headers_mut().insert(
+        http::header::CONTENT_DISPOSITION,
+        format!("attachment; filename=\"track\"; filename*=UTF-8''{encoded}")
+            .parse()
+            .expect("percent-encoded filename is a valid header"),
+    );
+    Ok(response)
+}
+
 #[derive(Deserialize)]
 pub struct SearchParams {
     q: String,
@@ -351,5 +380,82 @@ pub async fn cover(
             Ok(response)
         }
         None => Err(ApiError::NotFound),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::{
+        Router,
+        body::{Body, to_bytes},
+        routing::get,
+    };
+
+    #[tokio::test]
+    async fn downloads_original_audio_with_filename_and_library_path_checks() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tmp")
+            .join(format!("download-test-{}", std::process::id()));
+        let music = root.join("music");
+        std::fs::create_dir_all(music.join("Album")).unwrap();
+        let filename = "Трек 100%20 #1.flac";
+        let original = b"original FLAC bytes, never transcoded";
+        std::fs::write(music.join("Album").join(filename), original).unwrap();
+        std::fs::write(music.join("notes.txt"), b"not audio").unwrap();
+        std::fs::write(root.join("outside.mp3"), b"outside").unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(root.join("outside.mp3"), music.join("escape.mp3")).unwrap();
+        let app = Router::new()
+            .route("/api/download/{*path}", get(download))
+            .with_state(Arc::new(AppState {
+                library: Arc::new(crate::library::Library::new(&music).unwrap()),
+                music_dir: music,
+                frontend_dir: root.clone(),
+            }));
+        let request = |path: &str| {
+            Request::builder()
+                .uri(format!("/api/download/{path}"))
+                .body(Body::empty())
+                .unwrap()
+        };
+        let encoded =
+            percent_encoding::utf8_percent_encode(filename, percent_encoding::NON_ALPHANUMERIC)
+                .to_string();
+        let response = app
+            .clone()
+            .oneshot(request(&format!("Album/{encoded}")))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers()[http::header::CONTENT_DISPOSITION],
+            format!("attachment; filename=\"track\"; filename*=UTF-8''{encoded}")
+        );
+        assert_eq!(
+            to_bytes(response.into_body(), usize::MAX)
+                .await
+                .unwrap()
+                .as_ref(),
+            original
+        );
+        for (path, expected) in [
+            ("Album", StatusCode::NOT_FOUND),
+            ("missing.mp3", StatusCode::NOT_FOUND),
+            ("notes.txt", StatusCode::NOT_FOUND),
+            ("%2e%2e/outside.mp3", StatusCode::FORBIDDEN),
+        ] {
+            assert_eq!(
+                app.clone().oneshot(request(path)).await.unwrap().status(),
+                expected,
+                "{path}"
+            );
+        }
+        #[cfg(unix)]
+        assert_eq!(
+            app.oneshot(request("escape.mp3")).await.unwrap().status(),
+            StatusCode::FORBIDDEN
+        );
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

@@ -56,6 +56,7 @@ const $timeDuration = document.getElementById("time-duration")!
 const $btnPrev = document.getElementById("btn-prev")!
 const $btnPlay = document.getElementById("btn-play")!
 const $btnNext = document.getElementById("btn-next")!
+const $btnDownload = document.getElementById("btn-download") as HTMLButtonElement
 const $volume = document.getElementById("volume") as HTMLInputElement
 const $volumeDisplay = document.getElementById("volume-display")!
 const $audio = document.getElementById("audio") as HTMLAudioElement
@@ -245,7 +246,26 @@ function maxVisibleColumns(): number {
   return Math.max(1, Math.floor(panelWidth / colWidth))
 }
 
+function selectedTrack(): Entry | null {
+  const entry = state.columns[state.focusCol]?.entries[state.focusRow]
+  return entry?.kind === "file" ? entry : null
+}
+
+function downloadSelectedTrack() {
+  const track = selectedTrack()
+  if (!track) return
+  const link = document.createElement("a")
+  link.href = `/api/download/${encodePath(track.path)}`
+  link.download = track.name
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+}
+
 function renderColumns() {
+  const track = selectedTrack()
+  $btnDownload.disabled = track === null
+  $btnDownload.title = track ? `Download original: ${track.name}` : "Select a track to download"
   const maxCols = maxVisibleColumns()
   const startIdx = Math.max(0, state.columns.length - maxCols)
 
@@ -691,6 +711,8 @@ function onKeyDown(e: KeyboardEvent) {
     return
   }
 
+  if (e.target === $btnDownload && (e.key === "Enter" || e.key === " ")) return
+
   const col = state.columns[state.focusCol]
   if (!col) return
 
@@ -943,6 +965,7 @@ async function init() {
     }
   })
   $btnNext.addEventListener("click", () => playByFileIndex(1))
+  $btnDownload.addEventListener("click", downloadSelectedTrack)
   $volume.addEventListener("input", onVolumeChange)
   $searchInput.addEventListener("input", onSearchManualInput)
   $searchOverlay.addEventListener("click", (e) => {

@@ -59,6 +59,7 @@ async fn main() {
         .route("/api/tree", get(api::tree))
         .route("/api/search", get(api::search_tracks))
         .route("/api/stream/{*path}", get(api::stream))
+        .route("/api/download/{*path}", get(api::download))
         .route("/api/metadata/{*path}", get(api::metadata))
         .route("/api/cover/{*path}", get(api::cover))
         .route("/api/warm", post(api::warm))
