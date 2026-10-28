@@ -2,7 +2,7 @@
   "name": "love-frontend",
   "private": true,
   "scripts": {
-    "build": "bun build app.ts --outdir dist --minify",
-    "dev": "bun build app.ts --outdir dist --watch"
+    "build": "bun build app.ts --outdir dist --minify --define \"__LOVE_BUILD__=\\\"${LOVE_COMMIT:-$(git rev-parse --short HEAD)}\\\"\"",
+    "dev": "bun build app.ts --outdir dist --watch --define \"__LOVE_BUILD__=\\\"${LOVE_COMMIT:-$(git rev-parse --short HEAD)}\\\"\""
   }
 }

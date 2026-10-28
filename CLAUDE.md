@@ -41,6 +41,7 @@ frontend/
 ## Key Patterns
 
 - Frontend is vanilla TS, bundled by bun, served as static files by axum
+- Frontend embeds LOVE_COMMIT (or the local Git hash), checks /api/version once at startup without caching, and shows a persistent reload warning on mismatch. Docker passes the same COMMIT_SHA to both builds.
 - FLAC transcoding shells out to ffmpeg (must be in PATH)
 - Cover art extracted via lofty (pure Rust), cached in memory
 - Filesystem is the source of truth; library.rs scans in the background and atomically replaces a shared folder-tree/search snapshot. Failed scans retain the previous snapshot. /api/tree uses content ETags; visible frontend tabs revalidate periodically.

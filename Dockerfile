@@ -7,9 +7,10 @@ COPY src/ src/
 RUN LOVE_COMMIT=${COMMIT_SHA} cargo build --release
 
 FROM oven/bun:1 AS frontend
+ARG COMMIT_SHA=unknown
 WORKDIR /app
 COPY frontend/ frontend/
-RUN cd frontend && bun install && bun run build
+RUN cd frontend && bun install && LOVE_COMMIT=${COMMIT_SHA} bun run build
 
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg ca-certificates && rm -rf /var/lib/apt/lists/*

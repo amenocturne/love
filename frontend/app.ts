@@ -1,3 +1,5 @@
+declare const __LOVE_BUILD__: string
+
 // --- Types ---
 
 interface Entry {
@@ -986,8 +988,17 @@ async function init() {
     if (!document.hidden) refreshLibrary()
   })
 
-  fetch("/api/version").then(r => r.json()).then(v => {
-    document.getElementById("version")!.textContent = v.commit
+  document.getElementById("version")!.textContent = __LOVE_BUILD__
+  fetch("/api/version", { cache: "no-store" }).then(r => {
+    if (!r.ok) throw new Error("Version check failed")
+    return r.json()
+  }).then(v => {
+    if (v.commit === __LOVE_BUILD__) return
+    const warning = document.createElement("div")
+    warning.id = "version-warning"
+    warning.setAttribute("role", "alert")
+    warning.textContent = "Love has been updated. Reload this page to load the current version."
+    document.body.appendChild(warning)
   }).catch(() => {})
 }
 
