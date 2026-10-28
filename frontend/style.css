@@ -295,6 +295,7 @@ body {
 }
 
 #transport {
+  position: relative;
   display: flex;
   justify-content: center;
   gap: 24px;
@@ -321,19 +322,22 @@ body {
   background: #333;
 }
 
-#btn-download {
-  display: block;
-  margin: 8px auto 0;
-  padding: 8px 12px;
-  background: none;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  color: var(--text);
-  font: inherit;
-  cursor: pointer;
+#transport #btn-download {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  color: var(--text-dim);
 }
 
-#btn-download:hover:enabled {
+#transport #btn-download:hover:enabled {
+  color: var(--text);
   background: var(--row-selected);
 }
 
@@ -342,10 +346,10 @@ body {
   outline-offset: 2px;
 }
 
-#btn-download:disabled {
-  color: var(--text-dim);
+#transport #btn-download:disabled {
+  background: none;
   cursor: default;
-  opacity: 0.5;
+  opacity: 0.35;
 }
 
 /* --- Toast --- */
