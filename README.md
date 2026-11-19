@@ -7,7 +7,7 @@
 <p align="center">
   Self-hosted web music player that mirrors the folder-browsing experience of a hardware DAP.
   <br>
-  No playlists, no library indexing — just traverse the folder tree and play.
+  Browse your folder tree and play.
 </p>
 
 ![screenshot](assets/screenshot.png)
@@ -22,6 +22,7 @@ No existing self-hosted player preserves this. Love does.
 
 - **Miller column navigation** — Finder-style column view of your music folder tree
 - **Keyboard-first** — vim keys (hjkl), arrows, space for play/pause, `/` for search
+- **Quick lists** — collect tracks in ten colored slots. Each list stays in this browser until you clear it
 - **Automatic library refresh** — folder browsing and search follow added, renamed, and deleted music without restarting; open tabs update while playback continues
 - **Fuzzy search** — search the full path to find tracks across your library
 - **Cover art** — extracted from embedded ID3/Vorbis tags
@@ -68,11 +69,15 @@ Library changes are checked every 5 seconds. Set `LIBRARY_REFRESH_SECONDS` to a 
 |-----|--------|
 | `j` / `↓` | Move down |
 | `k` / `↑` | Move up |
-| `l` / `→` / `Enter` | Enter folder / play track |
-| `h` / `←` | Go to parent folder |
+| `l` / `→` / `Enter` | Open a folder or list, or play the selected track |
+| `h` / `←` | Go to the parent column |
+| `Tab` | Switch between Folders and Lists while browsing |
+| `1`–`0` | Add or remove the selected track in the corresponding list |
 | `Space` | Play / pause |
 | `/` | Open search |
 | `Esc` | Close search / double-press to stop |
+
+Folders and Lists each keep their browsing position. Playback follows the folder or list you started it from, even when you switch views. Use **Clear list** to reuse a slot.
 
 ## Tech
 

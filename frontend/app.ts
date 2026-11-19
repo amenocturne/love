@@ -12,14 +12,16 @@ interface Column {
   path: string
   entries: Entry[]
   selectedRow: number
+  scrollTop?: number
 }
+
+type PlaybackSource = { kind: "folder"; path: string } | { kind: "list"; key: string }
 
 interface PlayingTrack {
   path: string
-  name: string
-  folderPath: string
+  source: PlaybackSource
+  files: Entry[]
   index: number
-  totalFiles: number
 }
 
 interface TrackMetadata {
@@ -33,10 +35,14 @@ interface SearchResult {
   path: string
 }
 
-interface AppState {
+interface BrowserState {
+  kind: "folders" | "lists"
   columns: Column[]
   focusCol: number
   focusRow: number
+}
+
+interface AppState {
   playing: PlayingTrack | null
   searchOpen: boolean
   searchResults: SearchResult[]
@@ -46,6 +52,8 @@ interface AppState {
 // --- DOM refs ---
 
 const $columns = document.getElementById("columns")!
+const $browserTitle = document.getElementById("browser-title")!
+const $btnClearList = document.getElementById("btn-clear-list") as HTMLButtonElement
 const $coverArt = document.getElementById("cover-art") as HTMLImageElement
 const $coverPlaceholder = document.getElementById("cover-placeholder")!
 const $trackTitle = document.getElementById("track-title")!
@@ -69,15 +77,22 @@ const $searchResults = document.getElementById("search-results")!
 
 // --- State ---
 
+const folderBrowser: BrowserState = { kind: "folders", columns: [], focusCol: 0, focusRow: 0 }
+const listBrowser: BrowserState = { kind: "lists", columns: [], focusCol: 0, focusRow: 0 }
+let browser = folderBrowser
+
 const state: AppState = {
-  columns: [],
-  focusCol: 0,
-  focusRow: 0,
   playing: null,
   searchOpen: false,
   searchResults: [],
   searchSelectedIndex: 0,
 }
+
+const listKeys = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"]
+const listColors = ["#ff6663", "#ffa552", "#ffdb58", "#65d97a", "#4ab0fa", "#d95cf6", "#acadb3", "#44c9c4", "#ff81ad", "#b8a173"]
+const listsStorageKey = "love-quick-lists"
+const quickLists = new Map<string, string[]>()
+const renderedColumns = new Map<Column, HTMLElement>()
 
 // --- API + Cache ---
 
@@ -112,48 +127,112 @@ async function loadTree(): Promise<boolean> {
   }
 }
 
-function refreshColumns() {
-  const focusedPath = state.columns[state.focusCol]?.entries[state.focusRow]?.path
+function refreshFolderBrowser() {
   const columns: Column[] = []
-  for (const previous of state.columns) {
+  for (const previous of folderBrowser.columns) {
     if (!browseCache.has(previous.path)) break
     if (columns.length > 0 && !columns[columns.length - 1].entries.some(
       entry => entry.kind === "dir" && entry.path === previous.path,
     )) break
     const entries = fetchEntries(previous.path)
-    const selectedPath = previous.entries[previous.selectedRow]?.path
-    const selectedRow = entries.findIndex(entry => entry.path === selectedPath)
-    columns.push({
-      path: previous.path,
-      entries,
-      selectedRow: selectedRow >= 0 ? selectedRow : Math.max(0, Math.min(previous.selectedRow, entries.length - 1)),
-    })
+    columns.push(refreshColumn(previous, entries))
   }
-  state.columns = columns.length > 0 ? columns : [{ path: "", entries: fetchEntries(""), selectedRow: 0 }]
-  state.focusCol = Math.min(state.focusCol, state.columns.length - 1)
-  const focusedColumn = state.columns[state.focusCol]
-  const focusedRow = focusedColumn.entries.findIndex(entry => entry.path === focusedPath)
-  state.focusRow = focusedRow >= 0 ? focusedRow : focusedColumn.selectedRow
+  folderBrowser.columns = columns.length > 0 ? columns : [{ path: "", entries: fetchEntries(""), selectedRow: 0 }]
+  folderBrowser.focusCol = Math.min(folderBrowser.focusCol, folderBrowser.columns.length - 1)
+  folderBrowser.focusRow = folderBrowser.columns[folderBrowser.focusCol].selectedRow
 
-  if (state.playing) {
-    const files = fetchEntries(state.playing.folderPath).filter(entry => entry.kind === "file")
-    const index = files.findIndex(entry => entry.path === state.playing!.path)
+  const playing = state.playing
+  if (playing?.source.kind === "folder") {
+    const files = fetchEntries(playing.source.path).filter(entry => entry.kind === "file")
+    const index = files.findIndex(entry => entry.path === playing.path)
     if (index >= 0) {
-      state.playing = { ...state.playing, index, totalFiles: files.length }
+      state.playing = { ...playing, files, index }
       updatePlayerUI()
     }
   }
-  renderColumns()
 }
 
 async function refreshLibrary() {
   if (document.hidden || !await loadTree()) return
-  refreshColumns()
+  rememberColumnScroll()
+  refreshFolderBrowser()
+  refreshListBrowser()
+  renderColumns()
   if (state.searchOpen && $searchInput.value.trim().length >= 2) doSearch()
 }
 
 function fetchEntries(path: string): Entry[] {
   return browseCache.get(path) || []
+}
+
+function trackAtPath(path: string): Entry | undefined {
+  const parent = path.slice(0, Math.max(0, path.lastIndexOf("/")))
+  return fetchEntries(parent).find(entry => entry.kind === "file" && entry.path === path)
+}
+
+function refreshColumn(column: Column, entries: Entry[]): Column {
+  const selectedPath = column.entries[column.selectedRow]?.path
+  const row = entries.findIndex(entry => entry.path === selectedPath)
+  return { ...column, entries, selectedRow: row >= 0 ? row : Math.max(0, Math.min(column.selectedRow, entries.length - 1)) }
+}
+
+// --- Quick lists ---
+
+function loadLists() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(listsStorageKey) || "{}")
+    for (const key of listKeys) {
+      if (Array.isArray(saved?.[key])) {
+        quickLists.set(key, [...new Set<string>(saved[key].filter((path: unknown) => typeof path === "string"))])
+      }
+    }
+  } catch {}
+}
+
+function saveLists() {
+  localStorage.setItem(listsStorageKey, JSON.stringify(Object.fromEntries(quickLists)))
+}
+
+function listTracks(key: string): Entry[] {
+  return (quickLists.get(key) || []).flatMap(path => trackAtPath(path) ?? [])
+}
+
+function refreshListBrowser() {
+  const slots: Entry[] = listKeys.map(key => ({
+    name: key,
+    kind: "dir",
+    path: key,
+  }))
+  if (!listBrowser.columns.length) {
+    listBrowser.columns = [{ path: "", entries: slots, selectedRow: 0 }]
+  }
+  const list = listBrowser.columns[1]
+  if (list) listBrowser.columns[1] = refreshColumn(list, listTracks(list.path))
+  listBrowser.focusRow = listBrowser.columns[listBrowser.focusCol].selectedRow
+}
+
+function toggleListMembership(key: string, track: Entry) {
+  const paths = quickLists.get(key) || []
+  quickLists.set(key, paths.includes(track.path) ? paths.filter(path => path !== track.path) : [...paths, track.path])
+  saveLists()
+  rememberColumnScroll()
+  refreshListBrowser()
+  renderColumns()
+}
+
+function currentListKey() {
+  return listBrowser.columns[1]?.path || listBrowser.columns[0]?.entries[listBrowser.focusRow]?.path
+}
+
+function clearCurrentList() {
+  const key = currentListKey()
+  if (!key || browser !== listBrowser) return
+  quickLists.delete(key)
+  saveLists()
+  rememberColumnScroll()
+  refreshListBrowser()
+  renderColumns()
+  $columns.focus({ preventScroll: true })
 }
 
 async function fetchMetadata(path: string): Promise<TrackMetadata> {
@@ -249,7 +328,7 @@ function maxVisibleColumns(): number {
 }
 
 function selectedTrack(): Entry | null {
-  const entry = state.columns[state.focusCol]?.entries[state.focusRow]
+  const entry = browser.columns[browser.focusCol]?.entries[browser.focusRow]
   return entry?.kind === "file" ? entry : null
 }
 
@@ -264,29 +343,49 @@ function downloadSelectedTrack() {
   link.remove()
 }
 
-function renderColumns() {
+function rememberColumnScroll() {
+  for (const [column, element] of renderedColumns) column.scrollTop = element.scrollTop
+}
+
+function listDot(key: string) {
+  const dot = document.createElement("span")
+  dot.className = "list-dot"
+  dot.style.backgroundColor = listColors[listKeys.indexOf(key)]
+  dot.title = `List ${key}`
+  return dot
+}
+
+function renderColumns(revealSelection = false) {
+  rememberColumnScroll()
+  renderedColumns.clear()
   const track = selectedTrack()
   $btnDownload.disabled = track === null
   $btnDownload.title = track ? `Download original: ${track.name}` : "Select a track to download"
+  const inLists = browser === listBrowser
+  $browserTitle.textContent = inLists ? "Lists" : "Folders"
+  $btnClearList.hidden = !inLists
+  const listKey = inLists ? currentListKey() : undefined
+  $btnClearList.disabled = !listKey || !quickLists.get(listKey)?.length
+  $btnClearList.title = listKey ? `Clear list ${listKey}` : "Clear list"
   const maxCols = maxVisibleColumns()
-  const startIdx = Math.max(0, state.columns.length - maxCols)
+  const startIdx = Math.max(0, browser.columns.length - maxCols)
 
   $columns.innerHTML = ""
 
-  for (let ci = startIdx; ci < state.columns.length; ci++) {
-    const col = state.columns[ci]
+  for (let ci = startIdx; ci < browser.columns.length; ci++) {
+    const col = browser.columns[ci]
     const colEl = document.createElement("div")
     colEl.className = "column"
-    if (ci !== state.focusCol) colEl.classList.add("inactive")
+    if (ci !== browser.focusCol) colEl.classList.add("inactive")
 
-    const childPath = ci + 1 < state.columns.length ? state.columns[ci + 1].path : null
+    const childPath = ci + 1 < browser.columns.length ? browser.columns[ci + 1].path : null
 
     for (let ri = 0; ri < col.entries.length; ri++) {
       const entry = col.entries[ri]
       const row = document.createElement("div")
       row.className = "row"
 
-      if (ci === state.focusCol && ri === state.focusRow) {
+      if (ci === browser.focusCol && ri === browser.focusRow) {
         row.classList.add("selected")
       }
 
@@ -306,14 +405,27 @@ function renderColumns() {
       name.className = "row-name"
       name.textContent = entry.name
 
+      if (inLists && entry.kind === "dir") {
+        icon.appendChild(listDot(entry.path))
+      }
       row.appendChild(icon)
       row.appendChild(name)
 
       if (entry.kind === "dir") {
+        if (inLists) {
+          const count = document.createElement("span")
+          count.className = "list-count"
+          count.textContent = String(listTracks(entry.path).length)
+          row.appendChild(count)
+        }
         const chevron = document.createElement("span")
         chevron.className = "row-chevron"
         chevron.textContent = "▸"
         row.appendChild(chevron)
+      } else {
+        for (const key of listKeys) {
+          if (quickLists.get(key)?.includes(entry.path)) row.appendChild(listDot(key))
+        }
       }
 
       row.addEventListener("click", () => onRowClick(ci, ri))
@@ -321,9 +433,11 @@ function renderColumns() {
     }
 
     $columns.appendChild(colEl)
+    colEl.scrollTop = col.scrollTop || 0
+    renderedColumns.set(col, colEl)
   }
 
-  scrollSelectedIntoView()
+  if (revealSelection) scrollSelectedIntoView()
 }
 
 function scrollSelectedIntoView() {
@@ -336,11 +450,17 @@ function scrollSelectedIntoView() {
 function updatePlayerUI() {
   const p = state.playing
   if (p) {
-    $trackPosition.textContent = `${p.index + 1} / ${p.totalFiles}`
+    $trackPosition.textContent = `${p.index + 1} / ${p.files.length}`
   } else {
     $trackPosition.textContent = "—"
   }
   $btnPlay.textContent = $audio.paused ? "▶" : "⏸"
+}
+
+function requestPlayback() {
+  $audio.play().catch(error => {
+    if (error.name !== "AbortError") showToast("Unable to play this track")
+  })
 }
 
 function updateCoverArt(trackPath: string | null) {
@@ -363,6 +483,7 @@ function updateCoverArt(trackPath: string | null) {
 
 async function updateTrackInfo(trackPath: string, fileName: string) {
   const meta = await fetchMetadata(trackPath)
+  if (state.playing?.path !== trackPath) return
   const title = meta.title || fileName.replace(/\.\w+$/, "")
   $trackTitle.textContent = title
   $trackArtist.textContent = meta.artist || ""
@@ -380,22 +501,22 @@ async function updateTrackInfo(trackPath: string, fileName: string) {
 // --- Navigation ---
 
 function enterDirectory(colIndex: number, rowIndex: number) {
-  const col = state.columns[colIndex]
+  const col = browser.columns[colIndex]
   if (!col) return
   const entry = col.entries[rowIndex]
   if (!entry || entry.kind !== "dir") return
 
   col.selectedRow = rowIndex
-  state.columns = state.columns.slice(0, colIndex + 1)
-  const entries = fetchEntries(entry.path)
-  state.columns.push({ path: entry.path, entries, selectedRow: 0 })
-  state.focusCol = state.columns.length - 1
-  state.focusRow = 0
-  renderColumns()
+  browser.columns = browser.columns.slice(0, colIndex + 1)
+  const entries = browser === listBrowser ? listTracks(entry.path) : fetchEntries(entry.path)
+  browser.columns.push({ path: entry.path, entries, selectedRow: 0 })
+  browser.focusCol = browser.columns.length - 1
+  browser.focusRow = 0
+  renderColumns(true)
 }
 
 function playFile(colIndex: number, rowIndex: number) {
-  const col = state.columns[colIndex]
+  const col = browser.columns[colIndex]
   if (!col) return
   const entry = col.entries[rowIndex]
   if (!entry || entry.kind !== "file") return
@@ -403,57 +524,56 @@ function playFile(colIndex: number, rowIndex: number) {
   const files = col.entries.filter(e => e.kind === "file")
   const fileIndex = files.findIndex(f => f.path === entry.path)
 
-  state.playing = {
-    path: entry.path,
-    name: entry.name,
-    folderPath: col.path,
-    index: fileIndex,
-    totalFiles: files.length,
-  }
-
-  $audio.src = audioCache.get(entry.path) || streamUrl(entry.path)
-  $audio.play()
-  updateCoverArt(entry.path)
-  updateTrackInfo(entry.path, entry.name)
-  updatePlayerUI()
-  renderColumns()
-  warmFolder(col.path)
+  const source: PlaybackSource = browser === listBrowser
+    ? { kind: "list", key: col.path }
+    : { kind: "folder", path: col.path }
+  startTrack(source, files, fileIndex)
 }
 
-function playByFileIndex(delta: number) {
-  if (!state.playing) return
-
-  const folderCol = state.columns.find(c => c.path === state.playing!.folderPath)
-  if (!folderCol) return
-
-  const files = folderCol.entries.filter(e => e.kind === "file")
-  const newIndex = state.playing.index + delta
-  if (newIndex < 0 || newIndex >= files.length) return
-
-  const file = files[newIndex]
+function startTrack(source: PlaybackSource, files: Entry[], index: number, autoplay = true) {
+  const file = files[index]
+  if (!file) return
   state.playing = {
     path: file.path,
-    name: file.name,
-    folderPath: state.playing.folderPath,
-    index: newIndex,
-    totalFiles: files.length,
-  }
-
-  const colIdx = state.columns.indexOf(folderCol)
-  if (colIdx >= 0) {
-    const rowIdx = folderCol.entries.indexOf(file)
-    if (rowIdx >= 0) {
-      state.focusCol = colIdx
-      state.focusRow = rowIdx
-      folderCol.selectedRow = rowIdx
-    }
+    source,
+    files,
+    index,
   }
 
   $audio.src = audioCache.get(file.path) || streamUrl(file.path)
-  $audio.play()
+  if (autoplay) requestPlayback()
   updateCoverArt(file.path)
   updateTrackInfo(file.path, file.name)
   updatePlayerUI()
+  renderColumns()
+  if (source.kind === "folder") warmFolder(source.path)
+}
+
+function playByFileIndex(delta: number) {
+  const playing = state.playing
+  if (!playing) return
+  const { source, files } = playing
+  const index = playing.index + delta
+  const file = files[index]
+  if (!file) return
+
+  const focusColumn = browser.columns[browser.focusCol]
+  const followsQueue = source.kind === "folder"
+    ? browser === folderBrowser && focusColumn?.path === source.path
+    : browser === listBrowser && focusColumn?.path === source.key
+  if (followsQueue && selectedTrack()?.path === playing.path) {
+    const row = focusColumn.entries.findIndex(entry => entry.path === file.path)
+    if (row >= 0) {
+      browser.focusRow = row
+      focusColumn.selectedRow = row
+    }
+  }
+  startTrack(source, files, index)
+  if (followsQueue && selectedTrack()?.path === file.path) scrollSelectedIntoView()
+}
+
+function switchBrowser() {
+  browser = browser === folderBrowser ? listBrowser : folderBrowser
   renderColumns()
 }
 
@@ -580,61 +700,33 @@ async function selectSearchItem(index: number) {
   navigateToPath(item.path)
 }
 
-function navigateToPath(fullPath: string, autoplay = true) {
-  const segments = fullPath.split("/")
-
-  const rootEntries = fetchEntries("")
-  state.columns = [{ path: "", entries: rootEntries, selectedRow: 0 }]
-
-  let lastFileIndex = -1
-
-  for (let i = 0; i < segments.length; i++) {
-    const col = state.columns[state.columns.length - 1]
-    const entryIndex = col.entries.findIndex(e => e.name === segments[i])
+function showTrackFolder(path: string) {
+  const segments = path.split("/")
+  const columns: Column[] = [{ path: "", entries: fetchEntries(""), selectedRow: 0 }]
+  for (const segment of segments) {
+    const col = columns[columns.length - 1]
+    const entryIndex = col.entries.findIndex(e => e.name === segment)
     if (entryIndex < 0) break
 
     const entry = col.entries[entryIndex]
     col.selectedRow = entryIndex
 
     if (entry.kind === "dir") {
-      const entries = fetchEntries(entry.path)
-      state.columns.push({ path: entry.path, entries, selectedRow: 0 })
-    } else {
-      state.focusCol = state.columns.length - 1
-      state.focusRow = entryIndex
-      lastFileIndex = entryIndex
+      columns.push({ path: entry.path, entries: fetchEntries(entry.path), selectedRow: 0 })
     }
   }
 
-  if (state.focusCol === 0 && state.columns.length > 1) {
-    state.focusCol = state.columns.length - 1
-    state.focusRow = 0
-  }
+  folderBrowser.columns = columns
+  folderBrowser.focusCol = columns.length - 1
+  folderBrowser.focusRow = columns[folderBrowser.focusCol].selectedRow
+  browser = folderBrowser
+  renderColumns(true)
+}
 
-  renderColumns()
-
-  if (lastFileIndex >= 0 && autoplay) {
-    playFile(state.focusCol, lastFileIndex)
-  } else if (lastFileIndex >= 0) {
-    // Set up playing state without starting playback
-    const col = state.columns[state.focusCol]
-    const entry = col.entries[lastFileIndex]
-    const files = col.entries.filter(e => e.kind === "file")
-    const fileIndex = files.findIndex(f => f.path === entry.path)
-    state.playing = {
-      path: entry.path,
-      name: entry.name,
-      folderPath: col.path,
-      index: fileIndex,
-      totalFiles: files.length,
-    }
-    $audio.src = audioCache.get(entry.path) || streamUrl(entry.path)
-    updateCoverArt(entry.path)
-    updateTrackInfo(entry.path, entry.name)
-    updatePlayerUI()
-    renderColumns()
-    warmFolder(col.path)
-  }
+function navigateToPath(path: string) {
+  if (!trackAtPath(path)) return
+  showTrackFolder(path)
+  playFile(browser.focusCol, browser.focusRow)
 }
 
 function onSearchKeyDown(e: KeyboardEvent) {
@@ -666,39 +758,20 @@ function onSearchKeyDown(e: KeyboardEvent) {
 }
 
 function onCoverClick() {
-  if (!state.playing) return
-  const segments = state.playing.path.split("/")
-
-  const rootEntries = fetchEntries("")
-  state.columns = [{ path: "", entries: rootEntries, selectedRow: 0 }]
-
-  for (let i = 0; i < segments.length; i++) {
-    const col = state.columns[state.columns.length - 1]
-    const entryIndex = col.entries.findIndex(e => e.name === segments[i])
-    if (entryIndex < 0) break
-    const entry = col.entries[entryIndex]
-    col.selectedRow = entryIndex
-    if (entry.kind === "dir") {
-      const entries = fetchEntries(entry.path)
-      state.columns.push({ path: entry.path, entries, selectedRow: 0 })
-    } else {
-      state.focusCol = state.columns.length - 1
-      state.focusRow = entryIndex
-    }
-  }
-  renderColumns()
+  if (state.playing) showTrackFolder(state.playing.path)
 }
 
 // --- Event handlers ---
 
 function onRowClick(colIndex: number, rowIndex: number) {
-  state.columns[colIndex].selectedRow = rowIndex
-  state.focusCol = colIndex
-  state.focusRow = rowIndex
+  $columns.focus({ preventScroll: true })
+  browser.columns[colIndex].selectedRow = rowIndex
+  browser.focusCol = colIndex
+  browser.focusRow = rowIndex
 
-  state.columns = state.columns.slice(0, colIndex + 1)
+  browser.columns = browser.columns.slice(0, colIndex + 1)
 
-  const entry = state.columns[colIndex].entries[rowIndex]
+  const entry = browser.columns[colIndex].entries[rowIndex]
   if (entry.kind === "dir") {
     enterDirectory(colIndex, rowIndex)
   } else {
@@ -713,9 +786,22 @@ function onKeyDown(e: KeyboardEvent) {
     return
   }
 
-  if (e.target === $btnDownload && (e.key === "Enter" || e.key === " ")) return
+  const browsing = e.target === $columns || e.target === document.body
+  const bareKey = !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey
+  if (browsing && bareKey && e.key === "Tab") {
+    e.preventDefault()
+    if (!e.repeat) switchBrowser()
+    return
+  }
+  if (browsing && bareKey && listKeys.includes(e.key)) {
+    e.preventDefault()
+    const track = selectedTrack()
+    if (track && !e.repeat) toggleListMembership(e.key, track)
+    return
+  }
+  if (e.target instanceof HTMLElement && e.target.matches("button, input") && (e.key === "Enter" || e.key === " ")) return
 
-  const col = state.columns[state.focusCol]
+  const col = browser.columns[browser.focusCol]
   if (!col) return
 
   switch (e.key) {
@@ -727,20 +813,20 @@ function onKeyDown(e: KeyboardEvent) {
     case "j":
     case "ArrowDown":
       e.preventDefault()
-      if (state.focusRow < col.entries.length - 1) {
-        state.focusRow++
-        col.selectedRow = state.focusRow
-        renderColumns()
+      if (browser.focusRow < col.entries.length - 1) {
+        browser.focusRow++
+        col.selectedRow = browser.focusRow
+        renderColumns(true)
       }
       break
 
     case "k":
     case "ArrowUp":
       e.preventDefault()
-      if (state.focusRow > 0) {
-        state.focusRow--
-        col.selectedRow = state.focusRow
-        renderColumns()
+      if (browser.focusRow > 0) {
+        browser.focusRow--
+        col.selectedRow = browser.focusRow
+        renderColumns(true)
       }
       break
 
@@ -748,12 +834,12 @@ function onKeyDown(e: KeyboardEvent) {
     case "ArrowRight":
     case "Enter": {
       e.preventDefault()
-      const entry = col.entries[state.focusRow]
+      const entry = col.entries[browser.focusRow]
       if (!entry) break
       if (entry.kind === "dir") {
-        enterDirectory(state.focusCol, state.focusRow)
+        enterDirectory(browser.focusCol, browser.focusRow)
       } else {
-        playFile(state.focusCol, state.focusRow)
+        playFile(browser.focusCol, browser.focusRow)
       }
       break
     }
@@ -761,18 +847,18 @@ function onKeyDown(e: KeyboardEvent) {
     case "h":
     case "ArrowLeft":
       e.preventDefault()
-      if (state.focusCol > 0) {
-        state.columns = state.columns.slice(0, state.focusCol)
-        state.focusCol--
-        state.focusRow = state.columns[state.focusCol].selectedRow
-        renderColumns()
+      if (browser.focusCol > 0) {
+        browser.columns = browser.columns.slice(0, browser.focusCol)
+        browser.focusCol--
+        browser.focusRow = browser.columns[browser.focusCol].selectedRow
+        renderColumns(true)
       }
       break
 
     case " ":
       e.preventDefault()
       if ($audio.src) {
-        if ($audio.paused) $audio.play()
+        if ($audio.paused) requestPlayback()
         else $audio.pause()
         updatePlayerUI()
       }
@@ -815,13 +901,10 @@ function onTimeUpdate() {
 }
 
 function prefetchNextTrack() {
-  if (!state.playing) return
-  const folderCol = state.columns.find(c => c.path === state.playing!.folderPath)
-  if (!folderCol) return
-  const files = folderCol.entries.filter(e => e.kind === "file")
-  const nextIndex = state.playing.index + 1
-  if (nextIndex >= files.length) return
-  const nextPath = files[nextIndex].path
+  const playing = state.playing
+  if (!playing) return
+  const nextPath = playing.files[playing.index + 1]?.path
+  if (!nextPath) return
   if (audioCache.has(nextPath)) return
   if (prefetchedPath === nextPath) return
   prefetchedPath = nextPath
@@ -909,9 +992,12 @@ function saveState() {
   if (!state.playing) return
   const data = {
     path: state.playing.path,
-    name: state.playing.name,
     currentTime: $audio.currentTime,
     volume: parseFloat($volume.value),
+    ...(state.playing.source.kind === "list" && {
+      list: state.playing.source.key,
+      queue: state.playing.files.map(file => file.path),
+    }),
   }
   localStorage.setItem("love-state", JSON.stringify(data))
 }
@@ -925,8 +1011,19 @@ async function restoreState() {
       $volume.value = String(data.volume)
       onVolumeChange()
     }
-    if (data.path) {
-      navigateToPath(data.path, false)
+    if (typeof data.path === "string" && trackAtPath(data.path)) {
+      if (listKeys.includes(data.list) && Array.isArray(data.queue)) {
+        const files = data.queue.flatMap((path: unknown) => typeof path === "string" ? trackAtPath(path) ?? [] : [])
+        const index = files.findIndex((file: Entry) => file.path === data.path)
+        if (index >= 0) startTrack({ kind: "list", key: data.list }, files, index, false)
+      }
+      if (!state.playing) {
+        showTrackFolder(data.path)
+        const col = folderBrowser.columns[folderBrowser.focusCol]
+        const files = col.entries.filter(entry => entry.kind === "file")
+        const index = files.findIndex(entry => entry.path === data.path)
+        startTrack({ kind: "folder", path: col.path }, files, index, false)
+      }
       $audio.currentTime = data.currentTime || 0
       $audio.pause()
       updatePlayerUI()
@@ -938,7 +1035,7 @@ async function restoreState() {
 
 function setupMediaSession() {
   if (!("mediaSession" in navigator)) return
-  navigator.mediaSession.setActionHandler("play", () => { $audio.play(); updatePlayerUI() })
+  navigator.mediaSession.setActionHandler("play", () => { requestPlayback(); updatePlayerUI() })
   navigator.mediaSession.setActionHandler("pause", () => { $audio.pause(); updatePlayerUI() })
   navigator.mediaSession.setActionHandler("previoustrack", () => playByFileIndex(-1))
   navigator.mediaSession.setActionHandler("nexttrack", () => playByFileIndex(1))
@@ -948,9 +1045,11 @@ function setupMediaSession() {
 
 async function init() {
   await loadTree()
-  state.columns = [{ path: "", entries: fetchEntries(""), selectedRow: 0 }]
-  state.focusCol = 0
-  state.focusRow = 0
+  browser.columns = [{ path: "", entries: fetchEntries(""), selectedRow: 0 }]
+  browser.focusCol = 0
+  browser.focusRow = 0
+  loadLists()
+  refreshListBrowser()
   renderColumns()
 
   document.addEventListener("keydown", onKeyDown)
@@ -962,12 +1061,13 @@ async function init() {
   $btnPrev.addEventListener("click", () => playByFileIndex(-1))
   $btnPlay.addEventListener("click", () => {
     if ($audio.src) {
-      if ($audio.paused) $audio.play()
+      if ($audio.paused) requestPlayback()
       else $audio.pause()
     }
   })
   $btnNext.addEventListener("click", () => playByFileIndex(1))
   $btnDownload.addEventListener("click", downloadSelectedTrack)
+  $btnClearList.addEventListener("click", clearCurrentList)
   $volume.addEventListener("input", onVolumeChange)
   $searchInput.addEventListener("input", onSearchManualInput)
   $searchOverlay.addEventListener("click", (e) => {
@@ -977,7 +1077,7 @@ async function init() {
 
   $coverArt.addEventListener("click", onCoverClick)
   $coverPlaceholder.addEventListener("click", onCoverClick)
-  window.addEventListener("resize", renderColumns)
+  window.addEventListener("resize", () => renderColumns(true))
   window.addEventListener("beforeunload", saveState)
   setupMediaSession()
   loadSearchHistory()

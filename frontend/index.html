@@ -9,7 +9,14 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <div id="columns"></div>
+  <div id="browser">
+    <div id="browser-toolbar">
+      <span id="browser-title">Folders</span>
+      <kbd>Tab</kbd>
+      <button id="btn-clear-list" type="button" hidden disabled>Clear list</button>
+    </div>
+    <div id="columns" tabindex="-1" role="region" aria-labelledby="browser-title"></div>
+  </div>
   <div id="player">
     <div id="cover-area">
       <div id="cover-container">
