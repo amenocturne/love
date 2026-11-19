@@ -225,14 +225,14 @@ function confirmClearList(key: string) {
   if (listPendingClear !== null) return
   listPendingClear = key
   $confirmClearTitle.textContent = `Clear list ${key}?`
-  $confirmClearList.returnValue = ""
   $confirmClearList.showModal()
 }
 
-function finishClearList() {
+function finishClearList(confirmed: boolean) {
   const key = listPendingClear
   listPendingClear = null
-  if (key !== null && $confirmClearList.returnValue === "yes") {
+  $confirmClearList.close()
+  if (key !== null && confirmed) {
     quickLists.delete(key)
     saveLists()
     rememberColumnScroll()
@@ -814,6 +814,12 @@ function onKeyDown(e: KeyboardEvent) {
     if (track && !e.repeat) toggleListMembership(e.key, track)
     return
   }
+  if (browsing && bareKey && e.key === "x" && browser === listBrowser && browser.focusCol === 0) {
+    e.preventDefault()
+    const key = browser.columns[0]?.entries[browser.focusRow]?.path
+    if (key && !e.repeat) confirmClearList(key)
+    return
+  }
   if (e.target instanceof HTMLElement && e.target.matches("button, input") && (e.key === "Enter" || e.key === " ")) return
 
   const col = browser.columns[browser.focusCol]
@@ -1082,7 +1088,14 @@ async function init() {
   })
   $btnNext.addEventListener("click", () => playByFileIndex(1))
   $btnDownload.addEventListener("click", downloadSelectedTrack)
-  $confirmClearList.addEventListener("close", finishClearList)
+  $confirmClearList.addEventListener("submit", event => {
+    event.preventDefault()
+    finishClearList(event.submitter instanceof HTMLButtonElement && event.submitter.value === "yes")
+  })
+  $confirmClearList.addEventListener("cancel", event => {
+    event.preventDefault()
+    finishClearList(false)
+  })
   $volume.addEventListener("input", onVolumeChange)
   $searchInput.addEventListener("input", onSearchManualInput)
   $searchOverlay.addEventListener("click", (e) => {

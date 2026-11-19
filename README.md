@@ -73,11 +73,12 @@ Library changes are checked every 5 seconds. Set `LIBRARY_REFRESH_SECONDS` to a 
 | `h` / `←` | Go to the parent column |
 | `Tab` | Switch between Folders and Lists while browsing |
 | `1`–`0` | Add or remove the selected track in the corresponding list |
+| `x` | Ask to clear the selected numbered list |
 | `Space` | Play / pause |
 | `/` | Open search |
 | `Esc` | Close search / double-press to stop |
 
-Folders and Lists each keep their browsing position. Playback follows the folder or list you started it from, even when you switch views. To reuse a slot, click **×** beside its number and confirm.
+Folders and Lists each keep their browsing position. Playback follows the folder or list you started it from, even when you switch views. To reuse a slot, press `x` on its row or click **×** beside its number, then confirm.
 
 ## Tech
 
