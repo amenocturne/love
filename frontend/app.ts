@@ -52,8 +52,8 @@ interface AppState {
 // --- DOM refs ---
 
 const $columns = document.getElementById("columns")!
-const $browserTitle = document.getElementById("browser-title")!
-const $btnClearList = document.getElementById("btn-clear-list") as HTMLButtonElement
+const $confirmClearList = document.getElementById("confirm-clear-list") as HTMLDialogElement
+const $confirmClearTitle = document.getElementById("confirm-clear-title")!
 const $coverArt = document.getElementById("cover-art") as HTMLImageElement
 const $coverPlaceholder = document.getElementById("cover-placeholder")!
 const $trackTitle = document.getElementById("track-title")!
@@ -93,6 +93,7 @@ const listColors = ["#ff6663", "#ffa552", "#ffdb58", "#65d97a", "#4ab0fa", "#d95
 const listsStorageKey = "love-quick-lists"
 const quickLists = new Map<string, string[]>()
 const renderedColumns = new Map<Column, HTMLElement>()
+let listPendingClear: string | null = null
 
 // --- API + Cache ---
 
@@ -220,18 +221,24 @@ function toggleListMembership(key: string, track: Entry) {
   renderColumns()
 }
 
-function currentListKey() {
-  return listBrowser.columns[1]?.path || listBrowser.columns[0]?.entries[listBrowser.focusRow]?.path
+function confirmClearList(key: string) {
+  if (listPendingClear !== null) return
+  listPendingClear = key
+  $confirmClearTitle.textContent = `Clear list ${key}?`
+  $confirmClearList.returnValue = ""
+  $confirmClearList.showModal()
 }
 
-function clearCurrentList() {
-  const key = currentListKey()
-  if (!key || browser !== listBrowser) return
-  quickLists.delete(key)
-  saveLists()
-  rememberColumnScroll()
-  refreshListBrowser()
-  renderColumns()
+function finishClearList() {
+  const key = listPendingClear
+  listPendingClear = null
+  if (key !== null && $confirmClearList.returnValue === "yes") {
+    quickLists.delete(key)
+    saveLists()
+    rememberColumnScroll()
+    refreshListBrowser()
+    renderColumns()
+  }
   $columns.focus({ preventScroll: true })
 }
 
@@ -362,11 +369,7 @@ function renderColumns(revealSelection = false) {
   $btnDownload.disabled = track === null
   $btnDownload.title = track ? `Download original: ${track.name}` : "Select a track to download"
   const inLists = browser === listBrowser
-  $browserTitle.textContent = inLists ? "Lists" : "Folders"
-  $btnClearList.hidden = !inLists
-  const listKey = inLists ? currentListKey() : undefined
-  $btnClearList.disabled = !listKey || !quickLists.get(listKey)?.length
-  $btnClearList.title = listKey ? `Clear list ${listKey}` : "Clear list"
+  $columns.setAttribute("aria-label", inLists ? "Lists" : "Folders")
   const maxCols = maxVisibleColumns()
   const startIdx = Math.max(0, browser.columns.length - maxCols)
 
@@ -417,6 +420,16 @@ function renderColumns(revealSelection = false) {
           count.className = "list-count"
           count.textContent = String(listTracks(entry.path).length)
           row.appendChild(count)
+          const clear = document.createElement("button")
+          clear.className = "row-clear"
+          clear.type = "button"
+          clear.textContent = "×"
+          clear.setAttribute("aria-label", `Clear list ${entry.path}`)
+          clear.addEventListener("click", event => {
+            event.stopPropagation()
+            confirmClearList(entry.path)
+          })
+          row.appendChild(clear)
         }
         const chevron = document.createElement("span")
         chevron.className = "row-chevron"
@@ -781,6 +794,8 @@ function onRowClick(colIndex: number, rowIndex: number) {
 }
 
 function onKeyDown(e: KeyboardEvent) {
+  if (listPendingClear !== null) return
+
   if (state.searchOpen) {
     onSearchKeyDown(e)
     return
@@ -1067,7 +1082,7 @@ async function init() {
   })
   $btnNext.addEventListener("click", () => playByFileIndex(1))
   $btnDownload.addEventListener("click", downloadSelectedTrack)
-  $btnClearList.addEventListener("click", clearCurrentList)
+  $confirmClearList.addEventListener("close", finishClearList)
   $volume.addEventListener("input", onVolumeChange)
   $searchInput.addEventListener("input", onSearchManualInput)
   $searchOverlay.addEventListener("click", (e) => {

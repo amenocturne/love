@@ -9,14 +9,7 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <div id="browser">
-    <div id="browser-toolbar">
-      <span id="browser-title">Folders</span>
-      <kbd>Tab</kbd>
-      <button id="btn-clear-list" type="button" hidden disabled>Clear list</button>
-    </div>
-    <div id="columns" tabindex="-1" role="region" aria-labelledby="browser-title"></div>
-  </div>
+  <div id="columns" tabindex="-1" role="region" aria-label="Folders"></div>
   <div id="player">
     <div id="cover-area">
       <div id="cover-container">
@@ -61,6 +54,15 @@
       <div id="search-results"></div>
     </div>
   </div>
+  <dialog id="confirm-clear-list" aria-labelledby="confirm-clear-title">
+    <form method="dialog">
+      <p id="confirm-clear-title"></p>
+      <div class="dialog-actions">
+        <button type="submit" value="no">No</button>
+        <button type="submit" value="yes" autofocus>Yes</button>
+      </div>
+    </form>
+  </dialog>
   <div id="version"></div>
   <div id="toast" class="hidden"></div>
   <audio id="audio" preload="auto"></audio>

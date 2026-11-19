@@ -77,7 +77,7 @@ Library changes are checked every 5 seconds. Set `LIBRARY_REFRESH_SECONDS` to a 
 | `/` | Open search |
 | `Esc` | Close search / double-press to stop |
 
-Folders and Lists each keep their browsing position. Playback follows the folder or list you started it from, even when you switch views. Use **Clear list** to reuse a slot.
+Folders and Lists each keep their browsing position. Playback follows the folder or list you started it from, even when you switch views. To reuse a slot, click **×** beside its number and confirm.
 
 ## Tech
 
